@@ -7,10 +7,12 @@
 *.prof
 *.so
 *.test
+*~
+Godeps/_workspace/
 [568vq].out
 _cgo_defun.c
-_cgo_gotypes.go
 _cgo_export.*
+_cgo_gotypes.go
 _obj
 _test
 _testmain.go

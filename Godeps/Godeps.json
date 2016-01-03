@@ -1,0 +1,19 @@
+{
+	"ImportPath": "github.com/jedisct1/rpdns",
+	"GoVersion": "go1.5.2",
+	"Deps": [
+		{
+			"ImportPath": "github.com/dchest/siphash",
+			"Comment": "v1.0.0-28-g6d86178",
+			"Rev": "6d8617816bb5d8268011ffbfb8720f17ce9af63c"
+		},
+		{
+			"ImportPath": "github.com/hashicorp/golang-lru",
+			"Rev": "5c7531c003d8bf158b0fe5063649a2f41a822146"
+		},
+		{
+			"ImportPath": "github.com/miekg/dns",
+			"Rev": "aed88e096f2e341f40f4054f0af119659b8d8e58"
+		}
+	]
+}
