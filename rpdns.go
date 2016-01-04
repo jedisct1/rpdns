@@ -251,14 +251,14 @@ func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 	client := &dns.Client{Net: "udp"}
 	client.SingleInflight = true
 	resolved, rtt, err := client.Exchange(req, *addr)
-	if err != nil {
-		markFailed(*addr)
-		return nil, 0, err
-	}
 	if resolved.Truncated {
 		client = &dns.Client{Net: "tcp"}
 		client.SingleInflight = true
 		resolved, rtt, err = client.Exchange(req, *addr)
+	}
+	if err != nil {
+		markFailed(*addr)
+		return nil, 0, err
 	}
 	upstreamRtt.lock.Lock()
 	upstreamRtt.count++
