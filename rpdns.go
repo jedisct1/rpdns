@@ -20,14 +20,16 @@ import (
 )
 
 const (
+	// BayesianAverageC Constant for the Bayesian average for the RTT
+	BayesianAverageC = 10
 	// MaxFailures Maximum number of unanswered queries before a server is marked as dead for VacuumPeriod
-	MaxFailures = 1000000000
+	MaxFailures = 10
 	// MinTTL Minimum TTL
 	MinTTL = 60
 	// MaxTTL Maximum TTL
 	MaxTTL = 604800
 	// VacuumPeriod Vacuum period in seconds
-	VacuumPeriod = 5
+	VacuumPeriod = 30
 )
 
 // SipHashKey SipHash secret key
@@ -50,6 +52,13 @@ type UpstreamServers struct {
 	live    []string
 }
 
+// UpstreamRTT Keep track of the mean RTT
+type UpstreamRTT struct {
+	lock  sync.Mutex
+	RTT   float64
+	count float64
+}
+
 var (
 	address            = flag.String("listen", ":53", "Address to listen to (TCP and UDP)")
 	upstreamServersStr = flag.String("upstream", "8.8.8.8:53", "Comma-delimited list of upstream servers")
@@ -61,6 +70,8 @@ var (
 	sipHashKey         = SipHashKey{k1: 0, k2: 0}
 	pending            = uint32(0)
 	maxClients         = flag.Uint("maxclients", 10000, "Maximum number of simultaneous clients (default=10000)")
+	maxRTT             = flag.Float64("maxrtt", 0.25, "Maximum mean RTT for upstream queries before marking a server as dead")
+	upstreamRtt        UpstreamRTT
 )
 
 func parseUpstreamServers(str string) (*UpstreamServers, error) {
@@ -176,13 +187,17 @@ func markFailed(addr string) {
 	upstreamServers.lock.Lock()
 	defer upstreamServers.lock.Unlock()
 	for i, server := range upstreamServers.servers {
-		if server.addr == addr && server.offline == false {
-			upstreamServers.servers[i].failures++
-			if upstreamServers.servers[i].failures < MaxFailures {
-				return
-			}
-			break
+		if server.addr != addr {
+			continue
 		}
+		if server.offline {
+			return
+		}
+		upstreamServers.servers[i].failures++
+		if upstreamServers.servers[i].failures < MaxFailures {
+			return
+		}
+		break
 	}
 	servers := upstreamServers.servers
 	live := []string{}
@@ -195,6 +210,14 @@ func markFailed(addr string) {
 	}
 	upstreamServers.servers = servers
 	upstreamServers.live = live
+	log.Printf("[%v] is unresponsive", addr)
+}
+
+func resetRTT() {
+	upstreamRtt.lock.Lock()
+	defer upstreamRtt.lock.Unlock()
+	upstreamRtt.count = 0.0
+	upstreamRtt.RTT = 0.0
 }
 
 func resetUpstreamServers() {
@@ -212,31 +235,40 @@ func resetUpstreamServers() {
 	}
 	upstreamServers.servers = servers
 	upstreamServers.live = live
+	resetRTT()
 }
 
-func syncResolve(req *dns.Msg) (*dns.Msg, error) {
+func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 	curPending := atomic.AddUint32(&pending, uint32(1))
 	defer atomic.AddUint32(&pending, ^uint32(0))
 	if uint(curPending) > *maxClients {
-		return nil, errors.New("Too many clients")
+		return nil, 0, errors.New("Too many clients")
 	}
 	addr, err := pickUpstream(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	client := &dns.Client{Net: "udp"}
 	client.SingleInflight = true
-	resolved, _, err := client.Exchange(req, *addr)
+	resolved, rtt, err := client.Exchange(req, *addr)
 	if err != nil {
 		markFailed(*addr)
-		return nil, err
+		return nil, 0, err
 	}
 	if resolved.Truncated {
 		client = &dns.Client{Net: "tcp"}
 		client.SingleInflight = true
-		resolved, _, err = client.Exchange(req, *addr)
+		resolved, rtt, err = client.Exchange(req, *addr)
 	}
-	return resolved, nil
+	upstreamRtt.lock.Lock()
+	upstreamRtt.count++
+	upstreamRtt.RTT += rtt.Seconds()
+	meanRTT := upstreamRtt.RTT / (upstreamRtt.count + BayesianAverageC)
+	upstreamRtt.lock.Unlock()
+	if meanRTT > *maxRTT {
+		markFailed(*addr)
+	}
+	return resolved, rtt, nil
 }
 
 func resolve(req *dns.Msg, dnssec bool) (*dns.Msg, error) {
@@ -248,7 +280,7 @@ func resolve(req *dns.Msg, dnssec bool) (*dns.Msg, error) {
 	}
 	req.Extra = extra2
 	req.SetEdns0(dns.MaxMsgSize, dnssec)
-	resolved, err := syncResolve(req)
+	resolved, _, err := syncResolve(req)
 	if err != nil {
 		return nil, err
 	}
@@ -285,8 +317,6 @@ func vacuumThread() {
 		if memStats.Alloc > (*memSize)*1024*1024 {
 			cache.Purge()
 		}
-		pending := atomic.LoadUint32(&pending)
-		fmt.Printf("pending %v\n", pending)
 	}
 }
 
