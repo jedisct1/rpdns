@@ -26,6 +26,14 @@ advertised by the client.
 * DNSSEC support
 * Basic failover/load balancing with consistent hashing
 
+
+Install
+-------
+
+```bash
+$ go get github.com/jedisct1/rpdns
+```
+
 Usage
 -----
 ```
