@@ -51,7 +51,7 @@ var (
 	upstreamServers    *UpstreamServers
 	cacheSize          = flag.Int("cachesize", 10000000, "Cache size (default=10000000)")
 	memSize            = flag.Uint64("memsize", 1*1024, "Memory size in MB (default=1GB)")
-	minLabelsCount     = flag.Int("minlabels", 1, "Minimum number of labels")
+	minLabelsCount     = flag.Int("minlabels", 2, "Minimum number of labels (default=2)")
 	cache              *lru.ARCCache
 	sipHashKey         = SipHashKey{k1: 0, k2: 0}
 )
@@ -257,10 +257,16 @@ func vacuum() {
 	}
 }
 
+func failWithRcode(w dns.ResponseWriter, r *dns.Msg, rCode int) {
+	m := new(dns.Msg)
+	m.SetRcode(r, rCode)
+	w.WriteMsg(m)
+}
+
 func route(w dns.ResponseWriter, req *dns.Msg) {
 	keyP, err := getKey(req)
 	if err != nil {
-		dns.HandleFailed(w, req)
+		failWithRcode(w, req, dns.RcodeRefused)
 		return
 	}
 	maxPayloadSize := getMaxPayloadSize(req)
