@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"runtime"
 	"strings"
 	"sync"
@@ -150,12 +151,15 @@ func pickUpstream(req *dns.Msg) (*string, error) {
 	name := strings.ToLower(req.Question[0].Name)
 	h := siphash.Hash(sipHashKey.k1, sipHashKey.k2, []byte(name))
 	upstreamServers.lock.RLock()
-	liveCount := len(upstreamServers.live)
+	liveCount := uint64(len(upstreamServers.live))
 	if liveCount <= 0 {
 		upstreamServers.lock.RUnlock()
 		return nil, errors.New("All upstream servers are down")
 	}
-	i := h % uint64(len(upstreamServers.live))
+	i := h / (math.MaxUint64 / liveCount)
+	if i >= liveCount {
+		i = liveCount - 1
+	}
 	res := upstreamServers.live[i]
 	upstreamServers.lock.RUnlock()
 	return &res, nil
