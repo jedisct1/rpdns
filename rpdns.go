@@ -96,7 +96,7 @@ func main() {
 	go func() {
 		log.Fatal(tcpServer.ListenAndServe())
 	}()
-	vacuum()
+	vacuumThread()
 }
 
 // CacheKey Key for a cache entry
@@ -245,7 +245,7 @@ func sendTruncated(w dns.ResponseWriter, msgHdr dns.MsgHdr) {
 	w.WriteMsg(emptyResp)
 }
 
-func vacuum() {
+func vacuumThread() {
 	for {
 		time.Sleep(VacuumPeriod * time.Second)
 		resetUpstreamServers()
