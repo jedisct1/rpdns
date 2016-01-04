@@ -257,7 +257,6 @@ func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 		resolved, rtt, err = client.Exchange(req, *addr)
 	}
 	if err != nil {
-		fmt.Println(err)
 		markFailed(*addr)
 		return nil, 0, err
 	}
