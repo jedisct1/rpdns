@@ -45,9 +45,9 @@ Usage
   -maxrtt float
     	Maximum mean RTT for upstream queries before marking a server as dead (default 0.25)
   -memsize uint
-    	Memory size in MB (default=1GB) (default 1024)
+    	Memory size in MB (default 1024)
   -minlabels int
-    	Minimum number of labels (default=2) (default 2)
+    	Minimum number of labels (default 2)
   -upstream string
     	Comma-delimited list of upstream servers (default "8.8.8.8:53,8.8.4.4:53")
 ```
