@@ -61,15 +61,15 @@ type UpstreamRTT struct {
 
 var (
 	address            = flag.String("listen", ":53", "Address to listen to (TCP and UDP)")
-	upstreamServersStr = flag.String("upstream", "8.8.8.8:53", "Comma-delimited list of upstream servers")
+	upstreamServersStr = flag.String("upstream", "8.8.8.8:53,8.8.4.4:53", "Comma-delimited list of upstream servers")
 	upstreamServers    *UpstreamServers
-	cacheSize          = flag.Int("cachesize", 10000000, "Cache size (default=10000000)")
-	memSize            = flag.Uint64("memsize", 1*1024, "Memory size in MB (default=1GB)")
-	minLabelsCount     = flag.Int("minlabels", 2, "Minimum number of labels (default=2)")
+	cacheSize          = flag.Int("cachesize", 10000000, "Cache size")
+	memSize            = flag.Uint64("memsize", 1*1024, "Memory size in MB")
+	minLabelsCount     = flag.Int("minlabels", 2, "Minimum number of labels")
 	cache              *lru.ARCCache
 	sipHashKey         = SipHashKey{k1: 0, k2: 0}
 	pending            = uint32(0)
-	maxClients         = flag.Uint("maxclients", 10000, "Maximum number of simultaneous clients (default=10000)")
+	maxClients         = flag.Uint("maxclients", 10000, "Maximum number of simultaneous clients")
 	maxRTT             = flag.Float64("maxrtt", 0.25, "Maximum mean RTT for upstream queries before marking a server as dead")
 	upstreamRtt        UpstreamRTT
 )
