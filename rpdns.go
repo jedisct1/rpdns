@@ -19,6 +19,8 @@ import (
 )
 
 const (
+	// MaxFailures Maximum number of unanswered queries before a server is marked as dead for VacuumPeriod
+	MaxFailures = 15
 	// MinTTL Minimum TTL
 	MinTTL = 60
 	// MaxTTL Maximum TTL
@@ -35,8 +37,9 @@ type SipHashKey struct {
 
 // UpstreamServer Upstream server
 type UpstreamServer struct {
-	addr    string
-	offline bool
+	addr     string
+	failures uint
+	offline  bool
 }
 
 // UpstreamServers List of upstream servers
@@ -166,9 +169,18 @@ func pickUpstream(req *dns.Msg) (*string, error) {
 	return &res, nil
 }
 
-func markDead(addr string) {
+func markFailed(addr string) {
 	upstreamServers.lock.Lock()
 	defer upstreamServers.lock.Unlock()
+	for i, server := range upstreamServers.servers {
+		if server.addr == addr && server.offline == false {
+			upstreamServers.servers[i].failures++
+			if upstreamServers.servers[i].failures < MaxFailures {
+				return
+			}
+			break
+		}
+	}
 	servers := upstreamServers.servers
 	live := []string{}
 	for i, server := range upstreamServers.servers {
@@ -191,6 +203,7 @@ func resetUpstreamServers() {
 	}
 	live := []string{}
 	for i, server := range upstreamServers.servers {
+		servers[i].failures = 0
 		servers[i].offline = false
 		live = append(live, server.addr)
 	}
@@ -215,7 +228,7 @@ func resolve(req *dns.Msg, dnssec bool) (*dns.Msg, error) {
 	client.SingleInflight = true
 	resolved, _, err := client.Exchange(req, *addr)
 	if err != nil {
-		markDead(*addr)
+		markFailed(*addr)
 		return nil, err
 	}
 	if resolved.Truncated {
