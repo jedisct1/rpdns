@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dchest/siphash"
@@ -20,13 +21,13 @@ import (
 
 const (
 	// MaxFailures Maximum number of unanswered queries before a server is marked as dead for VacuumPeriod
-	MaxFailures = 15
+	MaxFailures = 1000000000
 	// MinTTL Minimum TTL
 	MinTTL = 60
 	// MaxTTL Maximum TTL
 	MaxTTL = 604800
 	// VacuumPeriod Vacuum period in seconds
-	VacuumPeriod = 30
+	VacuumPeriod = 5
 )
 
 // SipHashKey SipHash secret key
@@ -58,6 +59,8 @@ var (
 	minLabelsCount     = flag.Int("minlabels", 2, "Minimum number of labels (default=2)")
 	cache              *lru.ARCCache
 	sipHashKey         = SipHashKey{k1: 0, k2: 0}
+	pending            = uint32(0)
+	maxClients         = flag.Uint("maxclients", 10000, "Maximum number of simultaneous clients (default=10000)")
 )
 
 func parseUpstreamServers(str string) (*UpstreamServers, error) {
@@ -211,15 +214,12 @@ func resetUpstreamServers() {
 	upstreamServers.live = live
 }
 
-func resolve(req *dns.Msg, dnssec bool) (*dns.Msg, error) {
-	extra2 := []dns.RR{}
-	for _, extra := range req.Extra {
-		if extra.Header().Rrtype != dns.TypeOPT {
-			extra2 = append(extra2, extra)
-		}
+func syncResolve(req *dns.Msg) (*dns.Msg, error) {
+	curPending := atomic.AddUint32(&pending, uint32(1))
+	defer atomic.AddUint32(&pending, ^uint32(0))
+	if uint(curPending) > *maxClients {
+		return nil, errors.New("Too many clients")
 	}
-	req.Extra = extra2
-	req.SetEdns0(dns.MaxMsgSize, dnssec)
 	addr, err := pickUpstream(req)
 	if err != nil {
 		return nil, err
@@ -236,6 +236,19 @@ func resolve(req *dns.Msg, dnssec bool) (*dns.Msg, error) {
 		client.SingleInflight = true
 		resolved, _, err = client.Exchange(req, *addr)
 	}
+	return resolved, nil
+}
+
+func resolve(req *dns.Msg, dnssec bool) (*dns.Msg, error) {
+	extra2 := []dns.RR{}
+	for _, extra := range req.Extra {
+		if extra.Header().Rrtype != dns.TypeOPT {
+			extra2 = append(extra2, extra)
+		}
+	}
+	req.Extra = extra2
+	req.SetEdns0(dns.MaxMsgSize, dnssec)
+	resolved, err := syncResolve(req)
 	if err != nil {
 		return nil, err
 	}
@@ -272,6 +285,8 @@ func vacuumThread() {
 		if memStats.Alloc > (*memSize)*1024*1024 {
 			cache.Purge()
 		}
+		pending := atomic.LoadUint32(&pending)
+		fmt.Printf("pending %v\n", pending)
 	}
 }
 
