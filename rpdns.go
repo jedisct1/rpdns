@@ -131,7 +131,8 @@ func getKey(req *dns.Msg) (*CacheKey, error) {
 			dnssec = extra.(*dns.OPT).Do()
 		}
 	}
-	CacheKey := CacheKey{Name: strings.ToLower(question.Name), Qtype: question.Qtype, DNSSEC: dnssec}
+	CacheKey := CacheKey{Name: strings.ToLower(question.Name),
+		Qtype: question.Qtype, DNSSEC: dnssec}
 	return &CacheKey, nil
 }
 
@@ -267,10 +268,30 @@ func failWithRcode(w dns.ResponseWriter, r *dns.Msg, rCode int) {
 	w.WriteMsg(m)
 }
 
+func handleSpecialNames(w dns.ResponseWriter, req *dns.Msg) bool {
+	question := req.Question[0]
+	if question.Qtype != dns.TypeANY {
+		return false
+	}
+	m := new(dns.Msg)
+	m.Id = req.Id
+	hinfo := new(dns.HINFO)
+	hinfo.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeHINFO,
+		Class: dns.ClassINET, Ttl: 86400}
+	hinfo.Cpu = "ANY is not supported any more"
+	hinfo.Os = "See draft-jabley-dnsop-refuse-any"
+	m.Answer = []dns.RR{hinfo}
+	w.WriteMsg(m)
+	return true
+}
+
 func route(w dns.ResponseWriter, req *dns.Msg) {
 	keyP, err := getKey(req)
 	if err != nil {
 		failWithRcode(w, req, dns.RcodeRefused)
+		return
+	}
+	if handleSpecialNames(w, req) {
 		return
 	}
 	maxPayloadSize := getMaxPayloadSize(req)
