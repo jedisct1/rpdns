@@ -40,6 +40,7 @@ Usage
 -----
 
 ```
+Usage of ./rpdns:
   -cachesize int
     	Cache size (default 10000000)
   -listen string
