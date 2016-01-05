@@ -24,7 +24,7 @@ advertised by the client.
 resource exhaustion.
 * Validation - Do not forward invalid queries and queries that are not
 fully qualified to upstream servers.
-* ANY queries are answered directly as a synthesized HINFO record.
+* `ANY` queries are answered directly as a synthesized `HINFO` record.
 * TCP and UDP support; support for truncated responses.
 * ARC-based cache for DNS responses.
 * DNSSEC support.
