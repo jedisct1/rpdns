@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"runtime"
 	"strings"
 	"sync"
@@ -415,6 +416,10 @@ func getMinTTL(resp *dns.Msg) time.Duration {
 }
 
 func sendTruncated(w dns.ResponseWriter, msgHdr dns.MsgHdr) {
+	if _, isTCP := w.RemoteAddr().(*net.TCPAddr); isTCP {
+		w.Close()
+		return
+	}
 	emptyResp := new(dns.Msg)
 	emptyResp.MsgHdr = msgHdr
 	emptyResp.Truncated = true
