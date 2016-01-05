@@ -95,7 +95,7 @@ var (
 	maxFailures        = flag.Uint("maxfailures", 100, "Number of unanswered queries before a server is temporarily considered offline")
 	cache              *lru.ARCCache
 	sipHashKey         = SipHashKey{k1: 0, k2: 0}
-	maxClients         = flag.Uint("maxclients", 10000, "Maximum number of simultaneous clients")
+	maxClients         = flag.Uint("maxclients", 1000, "Maximum number of simultaneous clients")
 	maxRTT             = flag.Float64("maxrtt", 0.25, "Maximum mean RTT for upstream queries before marking a server as dead")
 	upstreamRtt        UpstreamRTT
 	resolverRing       chan QueuedRequest
