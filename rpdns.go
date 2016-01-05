@@ -96,7 +96,7 @@ func parseUpstreamServers(str string) (*UpstreamServers, error) {
 		live = append(live, addr)
 	}
 	res := UpstreamServers{servers: servers, live: live}
-	fmt.Printf("Using upstream servers: %v\n", live)
+	log.Printf("Configured upstream servers: %v\n", live)
 	return &res, nil
 }
 
@@ -119,6 +119,10 @@ func main() {
 	upstreamServers, _ = parseUpstreamServers(*upstreamServersStr)
 	sipHashKey = SipHashKey{k1: randUint64(), k2: randUint64()}
 	resolverRing = make(chan QueuedRequest, *maxClients)
+	probeUpstreamServers(true)
+	upstreamServers.lock.Lock()
+	log.Printf("Live upstream servers: %v\n", upstreamServers.live)
+	upstreamServers.lock.Unlock()
 	for i := uint(0); i < *maxClients; i++ {
 		go func() {
 			resolverThread()
@@ -133,7 +137,7 @@ func main() {
 	go func() {
 		log.Fatal(tcpServer.ListenAndServe())
 	}()
-	fmt.Println("RPDNS")
+	fmt.Println("Ready")
 	vacuumThread()
 }
 
@@ -265,6 +269,39 @@ func resetUpstreamServers() {
 	upstreamServers.lock.Unlock()
 }
 
+func probeUpstreamServers(verbose bool) {
+	upstreamServers.lock.Lock()
+	servers := upstreamServers.servers
+	upstreamServers.lock.Unlock()
+	live := []string{}
+	client := new(dns.Client)
+	req := new(dns.Msg)
+	req.SetQuestion(".", dns.TypeSOA)
+	for i, server := range upstreamServers.servers {
+		if verbose {
+			log.Printf("Probing [%v] ...", server.addr)
+		}
+		_, rtt, err := client.Exchange(req, server.addr)
+		if err == nil && rtt.Seconds() < *maxRTT {
+			servers[i].offline = false
+			servers[i].failures = 0
+			live = append(live, server.addr)
+			if verbose {
+				log.Printf("working, rtt=%v\n", rtt)
+			}
+		} else {
+			if verbose {
+				log.Println(err)
+			}
+		}
+	}
+	upstreamServers.lock.Lock()
+	upstreamServers.servers = servers
+	upstreamServers.live = live
+	upstreamServers.lock.Unlock()
+	resetRTT()
+}
+
 func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 	addr, err := pickUpstream(req)
 	if err != nil {
@@ -369,7 +406,7 @@ func sendTruncated(w dns.ResponseWriter, msgHdr dns.MsgHdr) {
 func vacuumThread() {
 	for {
 		time.Sleep(VacuumPeriod * time.Second)
-		resetUpstreamServers()
+		probeUpstreamServers(false)
 		memStats := new(runtime.MemStats)
 		runtime.ReadMemStats(memStats)
 		if memStats.Alloc > (*memSize)*1024*1024 {
