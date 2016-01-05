@@ -73,6 +73,19 @@ type QueuedRequest struct {
 	responseChan chan QueuedResponse
 }
 
+// CacheKey Key for a cache entry
+type CacheKey struct {
+	Name   string `dns:"cdomain-name"`
+	Qtype  uint16
+	DNSSEC bool
+}
+
+// CacheVal Value for a cache entry
+type CacheVal struct {
+	ValidUntil time.Time
+	Response   *dns.Msg
+}
+
 var (
 	address            = flag.String("listen", ":53", "Address to listen to (TCP and UDP)")
 	upstreamServersStr = flag.String("upstream", "8.8.8.8:53,8.8.4.4:53", "Comma-delimited list of upstream servers")
@@ -143,19 +156,6 @@ func main() {
 	}()
 	fmt.Println("Ready")
 	vacuumThread()
-}
-
-// CacheKey Key for a cache entry
-type CacheKey struct {
-	Name   string `dns:"cdomain-name"`
-	Qtype  uint16
-	DNSSEC bool
-}
-
-// CacheVal Value for a cache entry
-type CacheVal struct {
-	ValidUntil time.Time
-	Response   *dns.Msg
 }
 
 func getKey(req *dns.Msg) (*CacheKey, error) {
