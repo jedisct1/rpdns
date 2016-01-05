@@ -502,7 +502,7 @@ func route(w dns.ResponseWriter, req *dns.Msg) {
 			cache.Add(*keyP, CacheVal{ValidUntil: validUntil, Response: resp})
 		} else {
 			if cacheValP == nil {
-				dns.HandleFailed(w, req)
+				w.Close()
 				return
 			}
 			cacheVal := cacheValP.(CacheVal)
