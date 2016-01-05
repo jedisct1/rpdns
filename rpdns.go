@@ -350,12 +350,14 @@ func resolverThread() {
 		if time.Since(queuedRequest.ts).Seconds() > *maxRTT {
 			response := QueuedResponse{resolved: nil, rtt: 0, err: errors.New("Request too old")}
 			queuedRequest.responseChan <- response
+			close(queuedRequest.responseChan)
 			atomic.AddUint32(&slip, 1)
 			continue
 		}
 		resolved, rtt, err := syncResolve(queuedRequest.req)
 		response := QueuedResponse{resolved: resolved, rtt: rtt, err: err}
 		queuedRequest.responseChan <- response
+		close(queuedRequest.responseChan)
 	}
 }
 
