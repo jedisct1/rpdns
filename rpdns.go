@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dchest/siphash"
@@ -86,6 +87,7 @@ var (
 	upstreamRtt        UpstreamRTT
 	resolverRing       chan QueuedRequest
 	globalTimeout      = 2 * time.Second
+	slip               uint32
 )
 
 func parseUpstreamServers(str string) (*UpstreamServers, error) {
@@ -348,6 +350,7 @@ func resolverThread() {
 		if time.Since(queuedRequest.ts).Seconds() > *maxRTT {
 			response := QueuedResponse{resolved: nil, rtt: 0, err: errors.New("Request too old")}
 			queuedRequest.responseChan <- response
+			atomic.AddUint32(&slip, 1)
 			continue
 		}
 		resolved, rtt, err := syncResolve(queuedRequest.req)
@@ -418,6 +421,7 @@ func sendTruncated(w dns.ResponseWriter, msgHdr dns.MsgHdr) {
 func vacuumThread() {
 	for {
 		time.Sleep(VacuumPeriod * time.Second)
+		atomic.StoreUint32(&slip, 0)
 		probeUpstreamServers(false)
 		memStats := new(runtime.MemStats)
 		runtime.ReadMemStats(memStats)
@@ -469,6 +473,18 @@ func route(w dns.ResponseWriter, req *dns.Msg) {
 			resp = cacheVal.Response.Copy()
 			resp.Id = req.Id
 			resp.Question = req.Question
+		}
+	}
+	if resp == nil {
+		slipValue := atomic.LoadUint32(&slip)
+		if slipValue > 0 && slipValue%2 == 0 {
+			atomic.CompareAndSwapUint32(&slip, slipValue, slipValue+1)
+			if slipValue%4 == 0 {
+				sendTruncated(w, req.MsgHdr)
+			} else {
+				w.Close()
+			}
+			return
 		}
 	}
 	if resp == nil {

@@ -20,6 +20,8 @@ Features
 * EDNS0 support. Forwarded queries are rewritten in order to accept
 large payloads over UDP, independently from the payload size
 advertised by the client.
+* Response rate limiting in order to protect upstream servers against
+resource exhaustion.
 * ANY queries are answered directly as a synthesized HINFO record.
 * TCP and UDP support; support for truncated responses.
 * ARC-based DNS cache.
