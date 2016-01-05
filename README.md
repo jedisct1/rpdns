@@ -44,19 +44,21 @@ Usage
 ```
 Usage of ./rpdns:
   -cachesize int
-    	Cache size (default 10000000)
+        Number of cached responses (default 10000000)
   -listen string
-    	Address to listen to (TCP and UDP) (default ":53")
+        Address to listen to (TCP and UDP) (default ":53")
   -maxclients uint
-    	Maximum number of simultaneous clients (default 10000)
+        Maximum number of simultaneous clients (default 10000)
+  -maxfailures uint
+        Number of unanswered queries before a server is temporarily considered offline (default 100)
   -maxrtt float
-    	Maximum mean RTT for upstream queries before marking a server as dead (default 0.25)
+        Maximum mean RTT for upstream queries before marking a server as dead (default 0.25)
   -memsize uint
-    	Memory size in MB (default 1024)
+        Memory size in MB (default 1024)
   -minlabels int
-    	Minimum number of labels (default 2)
+        Minimum number of labels (default 2)
   -upstream string
-    	Comma-delimited list of upstream servers (default "8.8.8.8:53,8.8.4.4:53")
+        Comma-delimited list of upstream servers (default "8.8.8.8:53,8.8.4.4:53")
 ```
 
 Make sure to raise the number of allowed number of file descriptors to at least

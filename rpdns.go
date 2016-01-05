@@ -22,8 +22,6 @@ import (
 const (
 	// BayesianAverageC Constant for the Bayesian average for the RTT
 	BayesianAverageC = 100
-	// MaxFailures Maximum number of unanswered queries before a server is marked as dead for VacuumPeriod
-	MaxFailures = 100
 	// MinTTL Minimum TTL
 	MinTTL = 60
 	// MaxTTL Maximum TTL
@@ -93,6 +91,7 @@ var (
 	cacheSize          = flag.Int("cachesize", 10000000, "Number of cached responses")
 	memSize            = flag.Uint64("memsize", 1*1024, "Memory size in MB")
 	minLabelsCount     = flag.Int("minlabels", 2, "Minimum number of labels")
+	maxFailures        = flag.Uint("maxfailures", 100, "Number of unanswered queries before a server is temporarily considered offline")
 	cache              *lru.ARCCache
 	sipHashKey         = SipHashKey{k1: 0, k2: 0}
 	maxClients         = flag.Uint("maxclients", 10000, "Maximum number of simultaneous clients")
@@ -222,7 +221,7 @@ func markFailed(addr string) {
 			return
 		}
 		upstreamServers.servers[i].failures++
-		if upstreamServers.servers[i].failures < MaxFailures {
+		if upstreamServers.servers[i].failures < *maxFailures {
 			return
 		}
 		break
