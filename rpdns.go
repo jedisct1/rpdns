@@ -77,7 +77,7 @@ var (
 	address            = flag.String("listen", ":53", "Address to listen to (TCP and UDP)")
 	upstreamServersStr = flag.String("upstream", "8.8.8.8:53,8.8.4.4:53", "Comma-delimited list of upstream servers")
 	upstreamServers    *UpstreamServers
-	cacheSize          = flag.Int("cachesize", 10000000, "Cache size")
+	cacheSize          = flag.Int("cachesize", 10000000, "Number of cached responses")
 	memSize            = flag.Uint64("memsize", 1*1024, "Memory size in MB")
 	minLabelsCount     = flag.Int("minlabels", 2, "Minimum number of labels")
 	cache              *lru.ARCCache

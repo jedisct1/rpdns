@@ -22,6 +22,8 @@ large payloads over UDP, independently from the payload size
 advertised by the client.
 * Response rate limiting in order to protect upstream servers against
 resource exhaustion.
+* Validation - Do not forward invalid queries and queries that are not
+fully qualified to upstream servers.
 * ANY queries are answered directly as a synthesized HINFO record.
 * TCP and UDP support; support for truncated responses.
 * ARC-based DNS cache.
