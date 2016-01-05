@@ -145,8 +145,11 @@ func main() {
 		}()
 	}
 	dns.HandleFunc(".", route)
+	defer dns.HandleRemove(".")
 	udpServer := &dns.Server{Addr: *address, Net: "udp"}
+	defer udpServer.Shutdown()
 	tcpServer := &dns.Server{Addr: *address, Net: "tcp"}
+	defer tcpServer.Shutdown()
 	go func() {
 		log.Fatal(udpServer.ListenAndServe())
 	}()
