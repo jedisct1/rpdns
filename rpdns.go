@@ -416,12 +416,12 @@ func getMinTTL(resp *dns.Msg) time.Duration {
 }
 
 func sendTruncated(w dns.ResponseWriter, msgHdr dns.MsgHdr) {
-	if _, isTCP := w.RemoteAddr().(*net.TCPAddr); isTCP {
-		w.Close()
-		return
-	}
 	emptyResp := new(dns.Msg)
 	emptyResp.MsgHdr = msgHdr
+	if _, isTCP := w.RemoteAddr().(*net.TCPAddr); isTCP {
+		dns.HandleFailed(w, emptyResp)
+		return
+	}
 	emptyResp.Truncated = true
 	w.WriteMsg(emptyResp)
 }
