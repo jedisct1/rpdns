@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/dchest/siphash"
@@ -82,7 +81,6 @@ var (
 	minLabelsCount     = flag.Int("minlabels", 2, "Minimum number of labels")
 	cache              *lru.ARCCache
 	sipHashKey         = SipHashKey{k1: 0, k2: 0}
-	pending            = uint32(0)
 	maxClients         = flag.Uint("maxclients", 10000, "Maximum number of simultaneous clients")
 	maxRTT             = flag.Float64("maxrtt", 0.25, "Maximum mean RTT for upstream queries before marking a server as dead")
 	upstreamRtt        UpstreamRTT
@@ -260,11 +258,6 @@ func resetUpstreamServers() {
 }
 
 func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
-	curPending := atomic.AddUint32(&pending, uint32(1))
-	defer atomic.AddUint32(&pending, ^uint32(0))
-	if uint(curPending) > *maxClients {
-		return nil, 0, errors.New("Too many clients")
-	}
 	addr, err := pickUpstream(req)
 	if err != nil {
 		return nil, 0, err
