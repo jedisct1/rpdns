@@ -278,6 +278,10 @@ func probeUpstreamServers(verbose bool) {
 	req := new(dns.Msg)
 	req.SetQuestion(".", dns.TypeSOA)
 	for i, server := range upstreamServers.servers {
+		if server.offline == false {
+			live = append(live, server.addr)
+			continue
+		}
 		if verbose {
 			log.Printf("Probing [%v] ...", server.addr)
 		}
