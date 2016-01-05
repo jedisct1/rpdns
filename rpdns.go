@@ -85,6 +85,7 @@ var (
 	maxRTT             = flag.Float64("maxrtt", 0.25, "Maximum mean RTT for upstream queries before marking a server as dead")
 	upstreamRtt        UpstreamRTT
 	resolverRing       chan QueuedRequest
+	globalTimeout      = 2 * time.Second
 )
 
 func parseUpstreamServers(str string) (*UpstreamServers, error) {
@@ -119,6 +120,7 @@ func main() {
 	upstreamServers, _ = parseUpstreamServers(*upstreamServersStr)
 	sipHashKey = SipHashKey{k1: randUint64(), k2: randUint64()}
 	resolverRing = make(chan QueuedRequest, *maxClients)
+	globalTimeout = time.Duration((*maxRTT) * 3.0 * 1E9)
 	probeUpstreamServers(true)
 	upstreamServers.lock.Lock()
 	log.Printf("Live upstream servers: %v\n", upstreamServers.live)
@@ -278,7 +280,10 @@ func probeUpstreamServers(verbose bool) {
 	req := new(dns.Msg)
 	req.SetQuestion(".", dns.TypeSOA)
 	for i, server := range upstreamServers.servers {
-		if server.offline == false {
+		if server.offline == false && server.failures > 0 {
+			if verbose {
+				log.Printf("[%v] assumed to be online", server.addr)
+			}
 			live = append(live, server.addr)
 			continue
 		}
@@ -312,6 +317,9 @@ func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 		return nil, 0, err
 	}
 	client := &dns.Client{Net: "udp"}
+	client.DialTimeout = globalTimeout
+	client.ReadTimeout = globalTimeout
+	client.WriteTimeout = globalTimeout
 	client.SingleInflight = true
 	resolved, rtt, err := client.Exchange(req, *addr)
 	if resolved != nil && resolved.Truncated {
@@ -465,12 +473,19 @@ func route(w dns.ResponseWriter, req *dns.Msg) {
 	}
 	if resp == nil {
 		resp, err = resolve(req, keyP.DNSSEC)
-		if err != nil {
-			dns.HandleFailed(w, req)
-			return
+		if err == nil {
+			validUntil := time.Now().Add(getMinTTL(resp))
+			cache.Add(*keyP, CacheVal{ValidUntil: validUntil, Response: resp})
+		} else {
+			if cacheValP == nil {
+				dns.HandleFailed(w, req)
+				return
+			}
+			cacheVal := cacheValP.(CacheVal)
+			resp = cacheVal.Response.Copy()
+			resp.Id = req.Id
+			resp.Question = req.Question
 		}
-		validUntil := time.Now().Add(getMinTTL(resp))
-		cache.Add(*keyP, CacheVal{ValidUntil: validUntil, Response: resp})
 	}
 	packed, _ := resp.Pack()
 	packedLen := len(packed)
