@@ -25,7 +25,6 @@ advertised by the client.
 * DNSSEC support
 * Basic failover/load balancing with consistent hashing
 
-
 Install
 -------
 
@@ -52,3 +51,6 @@ Usage
   -upstream string
     	Comma-delimited list of upstream servers (default "8.8.8.8:53,8.8.4.4:53")
 ```
+
+Make sure to raise the number of allowed number of file descriptors to at least
+`maxclients * 2`.
