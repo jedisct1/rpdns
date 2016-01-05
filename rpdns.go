@@ -20,7 +20,7 @@ import (
 
 const (
 	// BayesianAverageC Constant for the Bayesian average for the RTT
-	BayesianAverageC = 10
+	BayesianAverageC = 100
 	// MaxFailures Maximum number of unanswered queries before a server is marked as dead for VacuumPeriod
 	MaxFailures = 100
 	// MinTTL Minimum TTL
@@ -28,7 +28,7 @@ const (
 	// MaxTTL Maximum TTL
 	MaxTTL = 604800
 	// VacuumPeriod Vacuum period in seconds
-	VacuumPeriod = 30
+	VacuumPeriod = 60
 )
 
 // SipHashKey SipHash secret key
@@ -96,6 +96,7 @@ func parseUpstreamServers(str string) (*UpstreamServers, error) {
 		live = append(live, addr)
 	}
 	res := UpstreamServers{servers: servers, live: live}
+	fmt.Printf("Using upstream servers: %v\n", live)
 	return &res, nil
 }
 
@@ -298,7 +299,6 @@ func resolverThread() {
 		if time.Since(queuedRequest.ts).Seconds() > *maxRTT {
 			response := QueuedResponse{resolved: nil, rtt: 0, err: errors.New("Request too old")}
 			queuedRequest.responseChan <- response
-			fmt.Println("Request too old")
 			continue
 		}
 		resolved, rtt, err := syncResolve(queuedRequest.req)
