@@ -218,6 +218,10 @@ func markFailed(addr string) {
 		}
 		break
 	}
+	if len(upstreamServers.live) <= 1 {
+		resetUpstreamServersNoLock()
+		return
+	}
 	servers := upstreamServers.servers
 	live := []string{}
 	for i, server := range upstreamServers.servers {
@@ -229,7 +233,6 @@ func markFailed(addr string) {
 	}
 	upstreamServers.servers = servers
 	upstreamServers.live = live
-	log.Printf("[%v] is unresponsive", addr)
 }
 
 func resetRTT() {
@@ -239,9 +242,7 @@ func resetRTT() {
 	upstreamRtt.RTT = 0.0
 }
 
-func resetUpstreamServers() {
-	upstreamServers.lock.Lock()
-	defer upstreamServers.lock.Unlock()
+func resetUpstreamServersNoLock() {
 	servers := upstreamServers.servers
 	if len(servers) == len(upstreamServers.live) {
 		return
@@ -255,6 +256,12 @@ func resetUpstreamServers() {
 	upstreamServers.servers = servers
 	upstreamServers.live = live
 	resetRTT()
+}
+
+func resetUpstreamServers() {
+	upstreamServers.lock.Lock()
+	resetUpstreamServersNoLock()
+	upstreamServers.lock.Unlock()
 }
 
 func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
