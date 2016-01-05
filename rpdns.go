@@ -23,7 +23,7 @@ const (
 	// BayesianAverageC Constant for the Bayesian average for the RTT
 	BayesianAverageC = 10
 	// MaxFailures Maximum number of unanswered queries before a server is marked as dead for VacuumPeriod
-	MaxFailures = 10
+	MaxFailures = 100
 	// MinTTL Minimum TTL
 	MinTTL = 60
 	// MaxTTL Maximum TTL
@@ -59,6 +59,20 @@ type UpstreamRTT struct {
 	count float64
 }
 
+// QueuedResponse Response to an asynchronous query
+type QueuedResponse struct {
+	resolved *dns.Msg
+	rtt      time.Duration
+	err      error
+}
+
+// QueuedRequest Asynchronous DNS request
+type QueuedRequest struct {
+	ts           time.Time
+	req          *dns.Msg
+	responseChan chan QueuedResponse
+}
+
 var (
 	address            = flag.String("listen", ":53", "Address to listen to (TCP and UDP)")
 	upstreamServersStr = flag.String("upstream", "8.8.8.8:53,8.8.4.4:53", "Comma-delimited list of upstream servers")
@@ -72,6 +86,7 @@ var (
 	maxClients         = flag.Uint("maxclients", 10000, "Maximum number of simultaneous clients")
 	maxRTT             = flag.Float64("maxrtt", 0.25, "Maximum mean RTT for upstream queries before marking a server as dead")
 	upstreamRtt        UpstreamRTT
+	resolverRing       chan QueuedRequest
 )
 
 func parseUpstreamServers(str string) (*UpstreamServers, error) {
@@ -104,7 +119,12 @@ func main() {
 	cache, _ = lru.NewARC(*cacheSize)
 	upstreamServers, _ = parseUpstreamServers(*upstreamServersStr)
 	sipHashKey = SipHashKey{k1: randUint64(), k2: randUint64()}
-	fmt.Println("RPDNS")
+	resolverRing = make(chan QueuedRequest, *maxClients)
+	for i := uint(0); i < *maxClients; i++ {
+		go func() {
+			resolverThread()
+		}()
+	}
 	dns.HandleFunc(".", route)
 	udpServer := &dns.Server{Addr: *address, Net: "udp"}
 	tcpServer := &dns.Server{Addr: *address, Net: "tcp"}
@@ -114,6 +134,7 @@ func main() {
 	go func() {
 		log.Fatal(tcpServer.ListenAndServe())
 	}()
+	fmt.Println("RPDNS")
 	vacuumThread()
 }
 
@@ -251,7 +272,7 @@ func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 	client := &dns.Client{Net: "udp"}
 	client.SingleInflight = true
 	resolved, rtt, err := client.Exchange(req, *addr)
-	if err != nil || (resolved != nil && resolved.Truncated) {
+	if resolved != nil && resolved.Truncated {
 		client = &dns.Client{Net: "tcp"}
 		client.SingleInflight = true
 		resolved, rtt, err = client.Exchange(req, *addr)
@@ -271,6 +292,43 @@ func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 	return resolved, rtt, nil
 }
 
+func resolverThread() {
+	for {
+		queuedRequest := <-resolverRing
+		if time.Since(queuedRequest.ts).Seconds() > *maxRTT {
+			response := QueuedResponse{resolved: nil, rtt: 0, err: errors.New("Request too old")}
+			queuedRequest.responseChan <- response
+			fmt.Println("Request too old")
+			continue
+		}
+		resolved, rtt, err := syncResolve(queuedRequest.req)
+		response := QueuedResponse{resolved: resolved, rtt: rtt, err: err}
+		queuedRequest.responseChan <- response
+	}
+}
+
+func resolveViaResolverThreads(req *dns.Msg) (*dns.Msg, time.Duration, error) {
+	responseChan := make(chan QueuedResponse)
+	queuedRequest := QueuedRequest{ts: time.Now(), req: req, responseChan: responseChan}
+	for queued := false; queued == false; {
+		select {
+		case resolverRing <- queuedRequest:
+			queued = true
+		default:
+			select {
+			case old := <-resolverRing:
+				evictedResponse := QueuedResponse{resolved: nil, rtt: 0, err: errors.New("Evicted")}
+				old.responseChan <- evictedResponse
+			}
+		}
+	}
+	response := <-responseChan
+	if response.err != nil {
+		return nil, response.rtt, errors.New("Stolen")
+	}
+	return response.resolved, response.rtt, nil
+}
+
 func resolve(req *dns.Msg, dnssec bool) (*dns.Msg, error) {
 	extra2 := []dns.RR{}
 	for _, extra := range req.Extra {
@@ -280,7 +338,7 @@ func resolve(req *dns.Msg, dnssec bool) (*dns.Msg, error) {
 	}
 	req.Extra = extra2
 	req.SetEdns0(dns.MaxMsgSize, dnssec)
-	resolved, _, err := syncResolve(req)
+	resolved, _, err := resolveViaResolverThreads(req)
 	if err != nil {
 		return nil, err
 	}
