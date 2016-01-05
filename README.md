@@ -1,6 +1,6 @@
 ![RPDNS](https://raw.github.com/jedisct1/rpdns/master/rpdns.png)
 
-RPDNS is a crude caching reverse DNS proxy.
+RPDNS is a caching reverse DNS proxy.
 
 ```
 [Clients] -> [RPDNS] -> [authoritative servers]
@@ -11,7 +11,8 @@ forwarding them to a set of authoritative servers.
 
 Although queries can be forwarded to recursive servers as well, RPDNS
 itself does not perform any recursion. Its main purpose is to reduce
-the load on authoritative servers.
+the load on authoritative servers, and to mitigate denial-of-service
+attacks.
 
 Features
 --------
@@ -20,10 +21,11 @@ Features
 large payloads over UDP, independently from the payload size
 advertised by the client.
 * ANY queries are answered directly as a synthesized HINFO record.
-* TCP and UDP support; support for truncated responses
-* ARC-based DNS cache
-* DNSSEC support
-* Basic failover/load balancing with consistent hashing
+* TCP and UDP support; support for truncated responses.
+* ARC-based DNS cache.
+* DNSSEC support.
+* Basic failover/load balancing with consistent hashing.
+* Resilience against outages of upstream servers.
 
 Install
 -------
