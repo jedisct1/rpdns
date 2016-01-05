@@ -26,7 +26,7 @@ resource exhaustion.
 fully qualified to upstream servers.
 * ANY queries are answered directly as a synthesized HINFO record.
 * TCP and UDP support; support for truncated responses.
-* ARC-based DNS cache.
+* ARC-based cache for DNS responses.
 * DNSSEC support.
 * Basic failover/load balancing with consistent hashing.
 * Resilience against outages of upstream servers.
