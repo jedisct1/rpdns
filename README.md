@@ -41,14 +41,22 @@ $ go get github.com/jedisct1/rpdns
 Usage
 -----
 
+Sample usage:
+```bash
+# rpdns -upstream 114.114.114.114:53,114.114.115.115:53 -maxclients 100 -maxfailures 2
 ```
-Usage of ./rpdns:
+
+Make sure to raise the number of allowed number of file descriptors to at least
+`maxclients * 2`.
+
+Available command-line options:
+```
   -cachesize int
         Number of cached responses (default 10000000)
   -listen string
         Address to listen to (TCP and UDP) (default ":53")
   -maxclients uint
-        Maximum number of simultaneous clients (default 10000)
+        Maximum number of simultaneous clients (default 1000)
   -maxfailures uint
         Number of unanswered queries before a server is temporarily considered offline (default 100)
   -maxrtt float
@@ -60,6 +68,3 @@ Usage of ./rpdns:
   -upstream string
         Comma-delimited list of upstream servers (default "8.8.8.8:53,8.8.4.4:53")
 ```
-
-Make sure to raise the number of allowed number of file descriptors to at least
-`maxclients * 2`.
