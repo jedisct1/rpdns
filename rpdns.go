@@ -403,6 +403,9 @@ func resolve(req *dns.Msg, dnssec bool) (*dns.Msg, error) {
 }
 
 func getMinTTL(resp *dns.Msg) time.Duration {
+	if len(resp.Answer) <= 0 {
+		return time.Duration(MinTTL) * time.Second
+	}
 	ttl := uint32(MaxTTL)
 	for _, rr := range resp.Answer {
 		if rr.Header().Ttl < ttl {
