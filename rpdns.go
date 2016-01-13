@@ -403,7 +403,7 @@ func resolveViaResolverThreads(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 	}
 	response := <-responseChan
 	if response.err != nil {
-		return nil, response.rtt, errors.New("Stolen")
+		return nil, response.rtt, response.err
 	}
 	return response.resolved, response.rtt, nil
 }
@@ -416,7 +416,7 @@ func resolve(req *dns.Msg, dnssec bool) (*dns.Msg, error) {
 		}
 	}
 	req.Extra = extra2
-	req.SetEdns0(dns.MaxMsgSize, dnssec)
+	req.SetEdns0(dns.DefaultMsgSize, dnssec)
 	resolved, _, err := resolveViaResolverThreads(req)
 	if err != nil {
 		return nil, err
