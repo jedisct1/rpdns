@@ -23,6 +23,8 @@ import (
 const (
 	// BayesianAverageC Constant for the Bayesian average for the RTT
 	BayesianAverageC = 100
+	// MaxUDPBufferSize UDP buffer size
+	MaxUDPBufferSize = 4194304
 	// MinTTL Minimum TTL
 	MinTTL = 60
 	// MaxTTL Maximum TTL
@@ -149,13 +151,34 @@ func main() {
 	defer dns.HandleRemove(".")
 	udpServer := &dns.Server{Addr: *address, Net: "udp"}
 	defer udpServer.Shutdown()
+	udpAddr, err := net.ResolveUDPAddr(udpServer.Net, udpServer.Addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	udpPacketConn, err := net.ListenUDP(udpServer.Net, udpAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	udpServer.PacketConn = udpPacketConn
+	udpPacketConn.SetWriteBuffer(MaxUDPBufferSize)
+	udpPacketConn.SetWriteBuffer(MaxUDPBufferSize)
+
 	tcpServer := &dns.Server{Addr: *address, Net: "tcp"}
 	defer tcpServer.Shutdown()
+	tcpAddr, err := net.ResolveTCPAddr(tcpServer.Net, tcpServer.Addr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	tcpListener, err := net.ListenTCP(tcpServer.Net, tcpAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	tcpServer.Listener = tcpListener
 	go func() {
-		log.Fatal(udpServer.ListenAndServe())
+		log.Fatal(udpServer.ActivateAndServe())
 	}()
 	go func() {
-		log.Fatal(tcpServer.ListenAndServe())
+		log.Fatal(tcpServer.ActivateAndServe())
 	}()
 	fmt.Println("Ready")
 	vacuumThread()
