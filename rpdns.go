@@ -444,6 +444,7 @@ func getMinTTL(resp *dns.Msg) time.Duration {
 func sendTruncated(w dns.ResponseWriter, msgHdr dns.MsgHdr) {
 	emptyResp := new(dns.Msg)
 	emptyResp.MsgHdr = msgHdr
+	emptyResp.Response = true
 	if _, isTCP := w.RemoteAddr().(*net.TCPAddr); isTCP {
 		dns.HandleFailed(w, emptyResp)
 		return
@@ -484,6 +485,7 @@ func handleSpecialNames(w dns.ResponseWriter, req *dns.Msg) bool {
 	hinfo.Cpu = "ANY is not supported any more"
 	hinfo.Os = "See draft-jabley-dnsop-refuse-any"
 	m.Answer = []dns.RR{hinfo}
+	m.Response = true
 	w.WriteMsg(m)
 	return true
 }
