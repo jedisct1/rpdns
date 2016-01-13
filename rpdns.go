@@ -456,7 +456,7 @@ func vacuumThread() {
 		probeUpstreamServers(false)
 		memStats := new(runtime.MemStats)
 		runtime.ReadMemStats(memStats)
-		if memStats.Alloc > (*memSize)*1024*1024 {
+		if memStats.Alloc > *memSize {
 			cache.Purge()
 		}
 	}
