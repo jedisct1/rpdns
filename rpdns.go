@@ -103,6 +103,8 @@ var (
 	resolverRing       chan QueuedRequest
 	globalTimeout      = 2 * time.Second
 	slip               uint32
+	udpClient          dns.Client
+	tcpClient          dns.Client
 )
 
 func parseUpstreamServers(str string) (*UpstreamServers, error) {
@@ -138,6 +140,8 @@ func main() {
 	sipHashKey = SipHashKey{k1: randUint64(), k2: randUint64()}
 	resolverRing = make(chan QueuedRequest, *maxClients)
 	globalTimeout = time.Duration((*maxRTT) * 3.0 * 1E9)
+	udpClient = dns.Client{Net: "udp", DialTimeout: globalTimeout, ReadTimeout: globalTimeout, WriteTimeout: globalTimeout, SingleInflight: true}
+	tcpClient = dns.Client{Net: "tcp", DialTimeout: globalTimeout, ReadTimeout: globalTimeout, WriteTimeout: globalTimeout, SingleInflight: true}
 	probeUpstreamServers(true)
 	upstreamServers.lock.Lock()
 	log.Printf("Live upstream servers: %v\n", upstreamServers.live)
@@ -303,7 +307,6 @@ func probeUpstreamServers(verbose bool) {
 	servers := upstreamServers.servers
 	upstreamServers.lock.Unlock()
 	live := []string{}
-	client := new(dns.Client)
 	req := new(dns.Msg)
 	req.SetQuestion(".", dns.TypeSOA)
 	for i, server := range upstreamServers.servers {
@@ -317,7 +320,7 @@ func probeUpstreamServers(verbose bool) {
 		if verbose {
 			log.Printf("Probing [%v] ...", server.addr)
 		}
-		_, rtt, err := client.Exchange(req, server.addr)
+		_, rtt, err := udpClient.Exchange(req, server.addr)
 		if err == nil && rtt.Seconds() < *maxRTT {
 			servers[i].offline = false
 			servers[i].failures = 0
@@ -343,16 +346,9 @@ func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	client := &dns.Client{Net: "udp"}
-	client.DialTimeout = globalTimeout
-	client.ReadTimeout = globalTimeout
-	client.WriteTimeout = globalTimeout
-	client.SingleInflight = true
-	resolved, rtt, err := client.Exchange(req, *addr)
+	resolved, rtt, err := udpClient.Exchange(req, *addr)
 	if err != nil || (resolved != nil && resolved.Truncated) {
-		client = &dns.Client{Net: "tcp"}
-		client.SingleInflight = true
-		resolved, rtt, err = client.Exchange(req, *addr)
+		resolved, rtt, err = tcpClient.Exchange(req, *addr)
 	}
 	if err != nil {
 		markFailed(*addr)
