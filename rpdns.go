@@ -349,7 +349,7 @@ func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 	client.WriteTimeout = globalTimeout
 	client.SingleInflight = true
 	resolved, rtt, err := client.Exchange(req, *addr)
-	if resolved != nil && resolved.Truncated {
+	if err != nil || (resolved != nil && resolved.Truncated) {
 		client = &dns.Client{Net: "tcp"}
 		client.SingleInflight = true
 		resolved, rtt, err = client.Exchange(req, *addr)
