@@ -25,6 +25,8 @@ const (
 	BayesianAverageC = 100
 	// MaxUDPBufferSize UDP buffer size
 	MaxUDPBufferSize = 4194304
+	// NegCacheMinTTL Minimum TTL for the negative cache
+	NegCacheMinTTL = 600
 	// MinTTL Minimum TTL
 	MinTTL = 60
 	// MaxTTL Maximum TTL
@@ -91,7 +93,7 @@ var (
 	address            = flag.String("listen", ":53", "Address to listen to (TCP and UDP)")
 	upstreamServersStr = flag.String("upstream", "8.8.8.8:53,8.8.4.4:53", "Comma-delimited list of upstream servers")
 	upstreamServers    *UpstreamServers
-	cacheSize          = flag.Int("cachesize", 10000000, "Number of cached responses")
+	cacheSize          = flag.Int("cachesize", 2*1024*1024*1024/2048, "Number of cached responses")
 	memSize            = flag.Uint64("memsize", 1*1024, "Memory size in MB")
 	minLabelsCount     = flag.Int("minlabels", 2, "Minimum number of labels")
 	maxFailures        = flag.Uint("maxfailures", 100, "Number of unanswered queries before a server is temporarily considered offline")
@@ -423,7 +425,7 @@ func resolve(req *dns.Msg, dnssec bool) (*dns.Msg, error) {
 
 func getMinTTL(resp *dns.Msg) time.Duration {
 	if len(resp.Answer) <= 0 {
-		return time.Duration(MinTTL) * time.Second
+		return time.Duration(NegCacheMinTTL) * time.Second
 	}
 	ttl := uint32(MaxTTL)
 	for _, rr := range resp.Answer {
@@ -432,7 +434,7 @@ func getMinTTL(resp *dns.Msg) time.Duration {
 		}
 	}
 	if ttl < MinTTL {
-		ttl = MaxTTL
+		ttl = MinTTL
 	}
 	return time.Duration(ttl) * time.Second
 }
