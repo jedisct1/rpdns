@@ -24,7 +24,7 @@ const (
 	// BayesianAverageC Constant for the Bayesian average for the RTT
 	BayesianAverageC = 100
 	// MaxUDPBufferSize UDP buffer size
-	MaxUDPBufferSize = 4194304
+	MaxUDPBufferSize = 16 * 1024 * 1024
 	// NegCacheMinTTL Minimum TTL for the negative cache
 	NegCacheMinTTL = 600
 	// MinTTL Minimum TTL
@@ -166,7 +166,7 @@ func main() {
 		log.Fatal(err)
 	}
 	udpServer.PacketConn = udpPacketConn
-	udpPacketConn.SetWriteBuffer(MaxUDPBufferSize)
+	udpPacketConn.SetReadBuffer(MaxUDPBufferSize)
 	udpPacketConn.SetWriteBuffer(MaxUDPBufferSize)
 
 	tcpServer := &dns.Server{Addr: *address, Net: "tcp"}
