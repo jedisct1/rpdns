@@ -94,7 +94,7 @@ var (
 	upstreamServersStr = flag.String("upstream", "8.8.8.8:53,8.8.4.4:53", "Comma-delimited list of upstream servers")
 	upstreamServers    *UpstreamServers
 	cacheSize          = flag.Int("cachesize", 2*1024*1024*1024/2048, "Number of cached responses")
-	memSize            = flag.Uint64("memsize", 1*1024, "Memory size in MB")
+	memSize            = flag.Uint64("memsize", 2*1024, "Memory size in MB")
 	minLabelsCount     = flag.Int("minlabels", 2, "Minimum number of labels")
 	maxFailures        = flag.Uint("maxfailures", 100, "Number of unanswered queries before a server is temporarily considered offline")
 	cache              *lru.ARCCache
