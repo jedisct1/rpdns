@@ -97,6 +97,7 @@ var (
 	memSize            = flag.Uint64("memsize", 2*1024, "Memory size in MB")
 	minLabelsCount     = flag.Int("minlabels", 2, "Minimum number of labels")
 	maxFailures        = flag.Uint("maxfailures", 100, "Number of unanswered queries before a server is temporarily considered offline")
+	debug              = flag.Bool("debug", false, "Debug mode")
 	cache              *lru.ARCCache
 	sipHashKey         = SipHashKey{k1: 0, k2: 0}
 	maxClients         = flag.Uint("maxclients", 1000, "Maximum number of simultaneous clients")
@@ -455,7 +456,7 @@ func vacuumThread() {
 	for {
 		time.Sleep(VacuumPeriod * time.Second)
 		atomic.StoreUint32(&slip, 0)
-		probeUpstreamServers(false)
+		probeUpstreamServers(*debug)
 		memStats := new(runtime.MemStats)
 		runtime.ReadMemStats(memStats)
 		if memStats.Alloc > *memSize {
@@ -508,6 +509,14 @@ func route(w dns.ResponseWriter, req *dns.Msg) {
 			resp.Id = req.Id
 			resp.Question = req.Question
 		}
+	}
+	if *debug {
+		question := req.Question[0]
+		cachedStr := ""
+		if resp != nil {
+			cachedStr = " (cached)"
+		}
+		log.Printf("%v\t%v %v%v\n", w.RemoteAddr(), question.Name, dns.TypeToString[question.Qtype], cachedStr)
 	}
 	if resp == nil {
 		slipValue := atomic.LoadUint32(&slip)
