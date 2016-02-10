@@ -506,6 +506,17 @@ func failWithRcode(w dns.ResponseWriter, r *dns.Msg, rCode int) {
 
 func handleSpecialNames(w dns.ResponseWriter, req *dns.Msg) bool {
 	question := req.Question[0]
+	nameLC := strings.ToLower(question.Name)
+	for _, localRR := range localRRS {
+		if nameLC == localRR.Name {
+			m := new(dns.Msg)
+			m.Id = req.Id
+			m.Answer = []dns.RR{*localRR.RR}
+			m.Response = true
+			w.WriteMsg(m)
+			return true
+		}
+	}
 	if question.Qtype != dns.TypeANY {
 		return false
 	}
