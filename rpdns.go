@@ -159,6 +159,9 @@ func parseLocalRRSFile(file string) {
 		if err != nil {
 			log.Fatal("failed to parse RR: ", err)
 		}
+		if rr == nil {
+			continue
+		}
 		localRR := LocalRR{Name: strings.ToLower(rr.Header().Name), RR: &rr}
 		localRRS = append(localRRS, localRR)
 	}
