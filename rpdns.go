@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -89,6 +91,12 @@ type CacheVal struct {
 	Response   *dns.Msg
 }
 
+// LocalRR Structure containing a locally served record
+type LocalRR struct {
+	Name string `dns:"cdomain-name"`
+	RR   *dns.RR
+}
+
 var (
 	address            = flag.String("listen", ":53", "Address to listen to (TCP and UDP)")
 	upstreamServersStr = flag.String("upstream", "8.8.8.8:53,8.8.4.4:53", "Comma-delimited list of upstream servers")
@@ -102,12 +110,14 @@ var (
 	sipHashKey         = SipHashKey{k1: 0, k2: 0}
 	maxClients         = flag.Uint("maxclients", 1000, "Maximum number of simultaneous clients")
 	maxRTT             = flag.Float64("maxrtt", 0.25, "Maximum mean RTT for upstream queries before marking a server as dead")
+	localRRSFile       = flag.String("local-rrs", "", "Config files with local records")
 	upstreamRtt        UpstreamRTT
 	resolverRing       chan QueuedRequest
 	globalTimeout      = 2 * time.Second
 	slip               uint32
 	udpClient          dns.Client
 	tcpClient          dns.Client
+	localRRS           []LocalRR
 )
 
 func parseUpstreamServers(str string) (*UpstreamServers, error) {
@@ -132,12 +142,35 @@ func randUint64() uint64 {
 	return binary.LittleEndian.Uint64(buf)
 }
 
+func parseLocalRRSFile(file string) {
+	if file == "" {
+		return
+	}
+	fp, err := os.Open(file)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer fp.Close()
+	scanner := bufio.NewScanner(fp)
+	localRRS = make([]LocalRR, 0)
+	for scanner.Scan() {
+		s := scanner.Text()
+		rr, err := dns.NewRR(s)
+		if err != nil {
+			log.Fatal("failed to parse RR: ", err)
+		}
+		localRR := LocalRR{Name: strings.ToLower(rr.Header().Name), RR: &rr}
+		localRRS = append(localRRS, localRR)
+	}
+}
+
 func main() {
 	flag.Parse()
 	*memSize *= 1024 * 1024
 	if *cacheSize < 2 {
 		log.Fatal("Cache size too small")
 	}
+	parseLocalRRSFile(*localRRSFile)
 	cache, _ = lru.NewARC(*cacheSize)
 	upstreamServers, _ = parseUpstreamServers(*upstreamServersStr)
 	sipHashKey = SipHashKey{k1: randUint64(), k2: randUint64()}
