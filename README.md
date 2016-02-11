@@ -51,10 +51,15 @@ Make sure to raise the number of allowed number of file descriptors to at least
 
 Available command-line options:
 ```
+Usage of ./rpdns:
   -cachesize int
-        Number of cached responses (default 10000000)
+        Number of cached responses (default 1048576)
+  -debug
+        Debug mode
   -listen string
         Address to listen to (TCP and UDP) (default ":53")
+  -local-rrs string
+        Config files with local records
   -maxclients uint
         Maximum number of simultaneous clients (default 1000)
   -maxfailures uint
@@ -62,9 +67,19 @@ Available command-line options:
   -maxrtt float
         Maximum mean RTT for upstream queries before marking a server as dead (default 0.25)
   -memsize uint
-        Memory size in MB (default 1024)
+        Memory size in MB (default 2048)
   -minlabels int
         Minimum number of labels (default 2)
   -upstream string
         Comma-delimited list of upstream servers (default "8.8.8.8:53,8.8.4.4:53")
+```
+
+Locally-served records can be defined using the `-local-rrs` switch,
+followed by a path to a configuration file.
+
+The format of this configuration file contains one record per line,
+using the text representation defined in RFC 1035:
+
+```
+a.b.c.local.example.com. 86400 IN A 192.0.2.1
 ```
