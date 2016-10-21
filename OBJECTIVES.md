@@ -60,7 +60,7 @@ this is a temporary situation.
 The cache can do its best to guarantee a maximum latency. If a response
 that needs to be refreshed doesn't get a response within a given
 time frame, the proxy can directly respond with the cached records in
-order to avoid break the latency guarantee.
+order to avoid breaking the latency guarantee.
 
 ### Prefetching [TODO]
 
