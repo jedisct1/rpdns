@@ -429,11 +429,9 @@ func resolveViaResolverThreads(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 		case resolverRing <- queuedRequest:
 			queued = true
 		default:
-			select {
-			case old := <-resolverRing:
-				evictedResponse := QueuedResponse{resolved: nil, rtt: 0, err: errors.New("Evicted")}
-				old.responseChan <- evictedResponse
-			}
+			old := <-resolverRing
+			evictedResponse := QueuedResponse{resolved: nil, rtt: 0, err: errors.New("Evicted")}
+			old.responseChan <- evictedResponse
 		}
 	}
 	response := <-responseChan
