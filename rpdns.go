@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/dchest/siphash"
-	"github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/miekg/dns"
 )
 
@@ -34,33 +34,33 @@ const (
 	// MaxTTL Maximum TTL
 	MaxTTL = 604800
 	// VacuumPeriod Vacuum period in seconds
-	VacuumPeriod = 60
+	VacuumPeriod = 60 * time.Second
 )
 
 // SipHashKey SipHash secret key
 type SipHashKey struct {
+	k0 uint64
 	k1 uint64
-	k2 uint64
 }
 
 // UpstreamServer Upstream server
 type UpstreamServer struct {
 	addr     string
-	failures uint
-	offline  bool
+	failures *uint64
+	offline  *atomic.Bool
 }
 
 // UpstreamServers List of upstream servers
 type UpstreamServers struct {
-	lock    sync.RWMutex
+	mu      sync.RWMutex
 	servers []UpstreamServer
 	live    []string
 }
 
 // UpstreamRTT Keep track of the mean RTT
 type UpstreamRTT struct {
-	lock  sync.Mutex
-	RTT   float64
+	mu    sync.Mutex
+	rtt   float64
 	count float64
 }
 
@@ -107,7 +107,7 @@ var (
 	maxFailures        = flag.Uint("maxfailures", 100, "Number of unanswered queries before a server is temporarily considered offline")
 	debug              = flag.Bool("debug", false, "Debug mode")
 	cache              *lru.ARCCache
-	sipHashKey         = SipHashKey{k1: 0, k2: 0}
+	sipHashKey         = SipHashKey{k0: 0, k1: 0}
 	maxClients         = flag.Uint("maxclients", 1000, "Maximum number of simultaneous clients")
 	maxRTT             = flag.Float64("maxrtt", 0.25, "Maximum mean RTT for upstream queries before marking a server as dead")
 	localRRSFile       = flag.String("local-rrs", "", "Config files with local records")
@@ -124,7 +124,12 @@ func parseUpstreamServers(str string) (*UpstreamServers, error) {
 	servers := []UpstreamServer{}
 	live := []string{}
 	for _, addr := range strings.Split(str, ",") {
-		server := UpstreamServer{addr: addr}
+		var failures uint64
+		server := UpstreamServer{
+			addr:     addr,
+			failures: &failures,
+			offline:  &atomic.Bool{},
+		}
 		servers = append(servers, server)
 		live = append(live, addr)
 	}
@@ -135,9 +140,9 @@ func parseUpstreamServers(str string) (*UpstreamServers, error) {
 
 func randUint64() uint64 {
 	buf := make([]byte, 8)
-	length, err := rand.Read(buf)
-	if err != nil || length != len(buf) {
-		log.Fatal("RNG failure")
+	_, err := rand.Read(buf)
+	if err != nil {
+		log.Fatal("RNG failure:", err)
 	}
 	return binary.LittleEndian.Uint64(buf)
 }
@@ -148,7 +153,7 @@ func parseLocalRRSFile(file string) {
 	}
 	fp, err := os.Open(file)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to open local RRS file: %v", err)
 	}
 	defer fp.Close()
 	scanner := bufio.NewScanner(fp)
@@ -157,7 +162,7 @@ func parseLocalRRSFile(file string) {
 		s := scanner.Text()
 		rr, err := dns.NewRR(s)
 		if err != nil {
-			log.Fatal("failed to parse RR: ", err)
+			log.Fatalf("failed to parse RR %q: %v", s, err)
 		}
 		if rr == nil {
 			continue
@@ -174,21 +179,26 @@ func main() {
 		log.Fatal("Cache size too small")
 	}
 	parseLocalRRSFile(*localRRSFile)
-	cache, _ = lru.NewARC(*cacheSize)
-	upstreamServers, _ = parseUpstreamServers(*upstreamServersStr)
-	sipHashKey = SipHashKey{k1: randUint64(), k2: randUint64()}
+	var err error
+	cache, err = lru.NewARC(*cacheSize)
+	if err != nil {
+		log.Fatal("Failed to create cache:", err)
+	}
+	upstreamServers, err = parseUpstreamServers(*upstreamServersStr)
+	if err != nil {
+		log.Fatal("Failed to parse upstream servers:", err)
+	}
+	sipHashKey = SipHashKey{k0: randUint64(), k1: randUint64()}
 	resolverRing = make(chan QueuedRequest, *maxClients)
-	globalTimeout = time.Duration((*maxRTT) * 3.0 * 1E9)
+	globalTimeout = time.Duration((*maxRTT) * 3.0 * float64(time.Second))
 	udpClient = dns.Client{Net: "udp", DialTimeout: globalTimeout, ReadTimeout: globalTimeout, WriteTimeout: globalTimeout, SingleInflight: true}
 	tcpClient = dns.Client{Net: "tcp", DialTimeout: globalTimeout, ReadTimeout: globalTimeout, WriteTimeout: globalTimeout, SingleInflight: true}
 	probeUpstreamServers(true)
-	upstreamServers.lock.Lock()
+	upstreamServers.mu.Lock()
 	log.Printf("Live upstream servers: %v\n", upstreamServers.live)
-	upstreamServers.lock.Unlock()
+	upstreamServers.mu.Unlock()
 	for i := uint(0); i < *maxClients; i++ {
-		go func() {
-			resolverThread()
-		}()
+		go resolverThread()
 	}
 	dns.HandleFunc(".", route)
 	defer dns.HandleRemove(".")
@@ -196,32 +206,40 @@ func main() {
 	defer udpServer.Shutdown()
 	udpAddr, err := net.ResolveUDPAddr(udpServer.Net, udpServer.Addr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to resolve UDP address: %v", err)
 	}
 	udpPacketConn, err := net.ListenUDP(udpServer.Net, udpAddr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to listen on UDP: %v", err)
 	}
 	udpServer.PacketConn = udpPacketConn
-	udpPacketConn.SetReadBuffer(MaxUDPBufferSize)
-	udpPacketConn.SetWriteBuffer(MaxUDPBufferSize)
+	if err := udpPacketConn.SetReadBuffer(MaxUDPBufferSize); err != nil {
+		log.Printf("Failed to set UDP read buffer: %v", err)
+	}
+	if err := udpPacketConn.SetWriteBuffer(MaxUDPBufferSize); err != nil {
+		log.Printf("Failed to set UDP write buffer: %v", err)
+	}
 
 	tcpServer := &dns.Server{Addr: *address, Net: "tcp"}
 	defer tcpServer.Shutdown()
 	tcpAddr, err := net.ResolveTCPAddr(tcpServer.Net, tcpServer.Addr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to resolve TCP address: %v", err)
 	}
 	tcpListener, err := net.ListenTCP(tcpServer.Net, tcpAddr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to listen on TCP: %v", err)
 	}
 	tcpServer.Listener = tcpListener
 	go func() {
-		log.Fatal(udpServer.ActivateAndServe())
+		if err := udpServer.ActivateAndServe(); err != nil {
+			log.Fatalf("UDP server error: %v", err)
+		}
 	}()
 	go func() {
-		log.Fatal(tcpServer.ActivateAndServe())
+		if err := tcpServer.ActivateAndServe(); err != nil {
+			log.Fatalf("TCP server error: %v", err)
+		}
 	}()
 	fmt.Println("Ready")
 	vacuumThread()
@@ -230,14 +248,14 @@ func main() {
 func getKey(req *dns.Msg) (*CacheKey, error) {
 	questions := req.Question
 	if len(questions) != 1 {
-		return nil, errors.New("Invalid number of questions")
+		return nil, errors.New("invalid number of questions")
 	}
 	question := questions[0]
 	if question.Qclass != dns.ClassINET {
-		return nil, errors.New("Unsupported question class")
+		return nil, errors.New("unsupported question class")
 	}
 	if dns.CountLabel(question.Name) < *minLabelsCount {
-		return nil, errors.New("Not enough labels")
+		return nil, errors.New("not enough labels")
 	}
 	dnssec := false
 	for _, extra := range req.Extra {
@@ -245,8 +263,10 @@ func getKey(req *dns.Msg) (*CacheKey, error) {
 			dnssec = extra.(*dns.OPT).Do()
 		}
 	}
-	CacheKey := CacheKey{Name: strings.ToLower(question.Name),
-		Qtype: question.Qtype, DNSSEC: dnssec}
+	CacheKey := CacheKey{
+		Name:  strings.ToLower(question.Name),
+		Qtype: question.Qtype, DNSSEC: dnssec,
+	}
 	return &CacheKey, nil
 }
 
@@ -264,12 +284,12 @@ func getMaxPayloadSize(req *dns.Msg) uint16 {
 
 func pickUpstream(req *dns.Msg) (*string, error) {
 	name := strings.ToLower(req.Question[0].Name)
-	h := siphash.Hash(sipHashKey.k1, sipHashKey.k2, []byte(name))
-	upstreamServers.lock.RLock()
-	defer upstreamServers.lock.RUnlock()
+	h := siphash.Hash(sipHashKey.k0, sipHashKey.k1, []byte(name))
+	upstreamServers.mu.RLock()
+	defer upstreamServers.mu.RUnlock()
 	liveCount := uint64(len(upstreamServers.live))
 	if liveCount <= 0 {
-		return nil, errors.New("All upstream servers are down")
+		return nil, errors.New("all upstream servers are down")
 	}
 	i := h / (math.MaxUint64 / liveCount)
 	if i >= liveCount {
@@ -280,17 +300,17 @@ func pickUpstream(req *dns.Msg) (*string, error) {
 }
 
 func markFailed(addr string) {
-	upstreamServers.lock.Lock()
-	defer upstreamServers.lock.Unlock()
-	for i, server := range upstreamServers.servers {
-		if server.addr != addr {
+	upstreamServers.mu.Lock()
+	defer upstreamServers.mu.Unlock()
+	for i := range upstreamServers.servers {
+		if upstreamServers.servers[i].addr != addr {
 			continue
 		}
-		if server.offline {
+		if upstreamServers.servers[i].offline.Load() {
 			return
 		}
-		upstreamServers.servers[i].failures++
-		if upstreamServers.servers[i].failures < *maxFailures {
+		newFailures := atomic.AddUint64(upstreamServers.servers[i].failures, 1)
+		if newFailures < uint64(*maxFailures) {
 			return
 		}
 		break
@@ -301,11 +321,11 @@ func markFailed(addr string) {
 	}
 	servers := upstreamServers.servers
 	live := []string{}
-	for i, server := range upstreamServers.servers {
-		if server.addr == addr {
-			servers[i].offline = true
-		} else if server.offline == false {
-			live = append(live, server.addr)
+	for i := range upstreamServers.servers {
+		if upstreamServers.servers[i].addr == addr {
+			servers[i].offline.Store(true)
+		} else if !upstreamServers.servers[i].offline.Load() {
+			live = append(live, upstreamServers.servers[i].addr)
 		}
 	}
 	upstreamServers.servers = servers
@@ -313,10 +333,10 @@ func markFailed(addr string) {
 }
 
 func resetRTT() {
-	upstreamRtt.lock.Lock()
-	defer upstreamRtt.lock.Unlock()
+	upstreamRtt.mu.Lock()
+	defer upstreamRtt.mu.Unlock()
 	upstreamRtt.count = 0.0
-	upstreamRtt.RTT = 0.0
+	upstreamRtt.rtt = 0.0
 }
 
 func resetUpstreamServersNoLock() {
@@ -325,10 +345,10 @@ func resetUpstreamServersNoLock() {
 		return
 	}
 	live := []string{}
-	for i, server := range upstreamServers.servers {
-		servers[i].failures = 0
-		servers[i].offline = false
-		live = append(live, server.addr)
+	for i := range upstreamServers.servers {
+		atomic.StoreUint64(servers[i].failures, 0)
+		servers[i].offline.Store(false)
+		live = append(live, upstreamServers.servers[i].addr)
 	}
 	upstreamServers.servers = servers
 	upstreamServers.live = live
@@ -336,20 +356,21 @@ func resetUpstreamServersNoLock() {
 }
 
 func resetUpstreamServers() {
-	upstreamServers.lock.Lock()
+	upstreamServers.mu.Lock()
 	resetUpstreamServersNoLock()
-	upstreamServers.lock.Unlock()
+	upstreamServers.mu.Unlock()
 }
 
 func probeUpstreamServers(verbose bool) {
-	upstreamServers.lock.Lock()
+	upstreamServers.mu.Lock()
 	servers := upstreamServers.servers
-	upstreamServers.lock.Unlock()
+	upstreamServers.mu.Unlock()
 	live := []string{}
 	req := new(dns.Msg)
 	req.SetQuestion(".", dns.TypeSOA)
-	for i, server := range upstreamServers.servers {
-		if server.offline == false && server.failures > 0 {
+	for i := range upstreamServers.servers {
+		server := &upstreamServers.servers[i]
+		if !server.offline.Load() && atomic.LoadUint64(server.failures) > 0 {
 			if verbose {
 				log.Printf("[%v] assumed to be online", server.addr)
 			}
@@ -361,8 +382,8 @@ func probeUpstreamServers(verbose bool) {
 		}
 		_, rtt, err := udpClient.Exchange(req, server.addr)
 		if err == nil && rtt.Seconds() < *maxRTT {
-			servers[i].offline = false
-			servers[i].failures = 0
+			servers[i].offline.Store(false)
+			atomic.StoreUint64(servers[i].failures, 0)
 			live = append(live, server.addr)
 			if verbose {
 				log.Printf("working, rtt=%v\n", rtt)
@@ -373,10 +394,10 @@ func probeUpstreamServers(verbose bool) {
 			}
 		}
 	}
-	upstreamServers.lock.Lock()
+	upstreamServers.mu.Lock()
 	upstreamServers.servers = servers
 	upstreamServers.live = live
-	upstreamServers.lock.Unlock()
+	upstreamServers.mu.Unlock()
 	resetRTT()
 }
 
@@ -393,11 +414,11 @@ func syncResolve(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 		markFailed(*addr)
 		return nil, 0, err
 	}
-	upstreamRtt.lock.Lock()
+	upstreamRtt.mu.Lock()
 	upstreamRtt.count++
-	upstreamRtt.RTT += rtt.Seconds()
-	meanRTT := upstreamRtt.RTT / (upstreamRtt.count + BayesianAverageC)
-	upstreamRtt.lock.Unlock()
+	upstreamRtt.rtt += rtt.Seconds()
+	meanRTT := upstreamRtt.rtt / (upstreamRtt.count + BayesianAverageC)
+	upstreamRtt.mu.Unlock()
 	if meanRTT > *maxRTT {
 		markFailed(*addr)
 	}
@@ -408,7 +429,7 @@ func resolverThread() {
 	for {
 		queuedRequest := <-resolverRing
 		if time.Since(queuedRequest.ts).Seconds() > *maxRTT {
-			response := QueuedResponse{resolved: nil, rtt: 0, err: errors.New("Request too old")}
+			response := QueuedResponse{resolved: nil, rtt: 0, err: errors.New("request too old")}
 			queuedRequest.responseChan <- response
 			close(queuedRequest.responseChan)
 			atomic.AddUint32(&slip, 1)
@@ -430,7 +451,7 @@ func resolveViaResolverThreads(req *dns.Msg) (*dns.Msg, time.Duration, error) {
 			queued = true
 		default:
 			old := <-resolverRing
-			evictedResponse := QueuedResponse{resolved: nil, rtt: 0, err: errors.New("Evicted")}
+			evictedResponse := QueuedResponse{resolved: nil, rtt: 0, err: errors.New("evicted")}
 			old.responseChan <- evictedResponse
 		}
 	}
@@ -483,12 +504,16 @@ func sendTruncated(w dns.ResponseWriter, msgHdr dns.MsgHdr) {
 		return
 	}
 	emptyResp.Truncated = true
-	w.WriteMsg(emptyResp)
+	if err := w.WriteMsg(emptyResp); err != nil {
+		if *debug {
+			log.Printf("Failed to write truncated response: %v", err)
+		}
+	}
 }
 
 func vacuumThread() {
 	for {
-		time.Sleep(VacuumPeriod * time.Second)
+		time.Sleep(VacuumPeriod)
 		atomic.StoreUint32(&slip, 0)
 		probeUpstreamServers(*debug)
 		memStats := new(runtime.MemStats)
@@ -502,7 +527,11 @@ func vacuumThread() {
 func failWithRcode(w dns.ResponseWriter, r *dns.Msg, rCode int) {
 	m := new(dns.Msg)
 	m.SetRcode(r, rCode)
-	w.WriteMsg(m)
+	if err := w.WriteMsg(m); err != nil {
+		if *debug {
+			log.Printf("Failed to write error response: %v", err)
+		}
+	}
 }
 
 func handleSpecialNames(w dns.ResponseWriter, req *dns.Msg) bool {
@@ -514,7 +543,11 @@ func handleSpecialNames(w dns.ResponseWriter, req *dns.Msg) bool {
 			m.Id = req.Id
 			m.Answer = []dns.RR{*localRR.RR}
 			m.Response = true
-			w.WriteMsg(m)
+			if err := w.WriteMsg(m); err != nil {
+				if *debug {
+					log.Printf("Failed to write local RR response: %v", err)
+				}
+			}
 			return true
 		}
 	}
@@ -524,13 +557,19 @@ func handleSpecialNames(w dns.ResponseWriter, req *dns.Msg) bool {
 	m := new(dns.Msg)
 	m.Id = req.Id
 	hinfo := new(dns.HINFO)
-	hinfo.Hdr = dns.RR_Header{Name: question.Name, Rrtype: dns.TypeHINFO,
-		Class: dns.ClassINET, Ttl: 86400}
+	hinfo.Hdr = dns.RR_Header{
+		Name: question.Name, Rrtype: dns.TypeHINFO,
+		Class: dns.ClassINET, Ttl: 86400,
+	}
 	hinfo.Cpu = "ANY is not supported any more"
 	hinfo.Os = "See draft-jabley-dnsop-refuse-any"
 	m.Answer = []dns.RR{hinfo}
 	m.Response = true
-	w.WriteMsg(m)
+	if err := w.WriteMsg(m); err != nil {
+		if *debug {
+			log.Printf("Failed to write ANY response: %v", err)
+		}
+	}
 	return true
 }
 
@@ -591,11 +630,19 @@ func route(w dns.ResponseWriter, req *dns.Msg) {
 			resp.Question = req.Question
 		}
 	}
-	packed, _ := resp.Pack()
+	packed, err := resp.Pack()
+	if err != nil {
+		w.Close()
+		return
+	}
 	packedLen := len(packed)
 	if uint16(packedLen) > maxPayloadSize {
 		sendTruncated(w, resp.MsgHdr)
 	} else {
-		w.WriteMsg(resp)
+		if err := w.WriteMsg(resp); err != nil {
+			if *debug {
+				log.Printf("Failed to write response: %v", err)
+			}
+		}
 	}
 }
